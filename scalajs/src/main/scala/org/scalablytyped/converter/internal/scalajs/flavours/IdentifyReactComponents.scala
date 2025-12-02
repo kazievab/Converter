@@ -337,19 +337,32 @@ class IdentifyReactComponents(
   def maybeFieldComponent(field: FieldTree, owner: ContainerTree, scope: TreeScope): Option[Component] = {
     def pointsAtComponentType(scope: TreeScope, current: TypeRef): Option[PropsRef] =
       reactNames.isComponent(current).orElse {
-        scope
-          .lookup(current.typeName)
-          .firstDefined {
-            case (x: ClassTree, newScope) =>
-              val rewritten = FillInTParams(x, newScope, current.targs, Empty)
-              parentsResolver(newScope, rewritten).transitiveParents.firstDefined {
-                case (tr, _) => pointsAtComponentType(newScope, tr)
+        current match {
+          // Plain function type returning a React element, not wrapped in React.FC, etc.
+          // Treat it as a component and take props from the first parameter.
+          case TypeRef.JsFunction(paramTypes, _) if paramTypes.nonEmpty =>
+            Some(reactNames.unpackedProps(paramTypes.head))
+
+          // Intersections like `(<T>(props: P) => R) & { Item: ... }` or
+          // `typeof ListWithForwardRef & { Item: ... }`.
+          case TypeRef.Intersection(types, _) =>
+            types.firstDefined(pointsAtComponentType(scope, _))
+
+          case _ =>
+            scope
+              .lookup(current.typeName)
+              .firstDefined {
+                case (x: ClassTree, newScope) =>
+                  val rewritten = FillInTParams(x, newScope, current.targs, Empty)
+                  parentsResolver(newScope, rewritten).transitiveParents.firstDefined {
+                    case (tr, _) => pointsAtComponentType(newScope, tr)
+                  }
+                case (x: TypeAliasTree, newScope) =>
+                  val rewritten = FillInTParams(x, newScope, current.targs, Empty)
+                  pointsAtComponentType(scope, rewritten.alias)
+                case _ => None
               }
-            case (x: TypeAliasTree, newScope) =>
-              val rewritten = FillInTParams(x, newScope, current.targs, Empty)
-              pointsAtComponentType(scope, rewritten.alias)
-            case _ => None
-          }
+        }
       }
 
     val fieldResult = pointsAtComponentType(scope, field.tpe).map(propsRef =>
