@@ -165,6 +165,21 @@ class JapgollyGenComponents(
 ) {
   import JapgollyGenComponents._
 
+  /**
+    * React.ForwardRefExoticComponent and friends often wrap props in an
+    * intersection with React.RefAttributes[R]. That intersection is not
+    * interesting for prop generation (ref is handled separately), and the
+    * extra arm tends to confuse FindProps. Strip such RefAttributes-terms
+    * before analysing props.
+    */
+  private def stripReactRefAttributes(tpe: TypeRef): TypeRef =
+    tpe match {
+      case TypeRef.Intersection(types, comments) =>
+        val kept = types.filterNot(tr => reactNames.RefAttributesQNames(tr.typeName))
+        if (kept.isEmpty) tpe else TypeRef.Intersection(kept, comments)
+      case other => other
+    }
+
   def apply(
       scope:      TreeScope,
       tree:       ContainerTree,
@@ -185,7 +200,7 @@ class JapgollyGenComponents(
         case (group, _) =>
           val resProps: Res[IArray[String], IArray[Prop]] =
             findProps.forType(
-              typeRef            = group.propsRef.ref,
+              typeRef            = stripReactRefAttributes(group.propsRef.ref),
               tparams            = group.tparams,
               scope              = scope,
               maxNum             = Int.MaxValue,

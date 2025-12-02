@@ -36,6 +36,9 @@ class ReactNames(val outputPkg: Name) {
   val ComponentPropsWithWithoutRefQNames: Set[QualifiedName] =
     explode("ComponentPropsWithRef", "ComponentPropsWithoutRef")
 
+  val RefAttributesQNames: Set[QualifiedName] =
+    explode("RefAttributes")
+
   val WrappedComponentsQNames: Set[QualifiedName] =
     explode("MemoExoticComponent", "LazyExoticComponent")
 

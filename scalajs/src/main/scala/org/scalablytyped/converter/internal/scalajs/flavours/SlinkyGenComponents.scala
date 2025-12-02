@@ -211,6 +211,20 @@ class SlinkyGenComponents(
 ) {
   import SlinkyGenComponents._
 
+  /**
+    * React.ForwardRefExoticComponent and similar utilities often wrap props in
+    * an intersection with React.RefAttributes[R]. That arm only contains ref
+    * plumbing and is irrelevant for prop generation, so we drop it to avoid
+    * confusing FindProps.
+    */
+  private def stripReactRefAttributes(tpe: TypeRef): TypeRef =
+    tpe match {
+      case TypeRef.Intersection(types, comments) =>
+        val kept = types.filterNot(tr => reactNames.RefAttributesQNames(tr.typeName))
+        if (kept.isEmpty) tpe else TypeRef.Intersection(kept, comments)
+      case other => other
+    }
+
   def apply(scope: TreeScope, tree: ContainerTree, components: IArray[Component]): ContainerTree =
     mode.webPresent[SlinkyWeb] match {
       case Some(mode) =>
@@ -369,11 +383,10 @@ class SlinkyGenComponents(
   ): PropsDom = {
     val resProps: Res[IArray[String], IArray[Prop]] =
       findProps.forType(
-        propsRef.ref,
+        stripReactRefAttributes(propsRef.ref),
         tparams,
         scope,
         maxNum             = Int.MaxValue,
-        acceptNativeTraits = true,
       )
 
     withDomProps match {

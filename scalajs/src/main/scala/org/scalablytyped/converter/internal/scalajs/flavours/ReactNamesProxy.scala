@@ -18,6 +18,9 @@ class ReactNamesProxy(reactNames: ReactNames, rewrites: IArray[CastConversion]) 
   val WrappedComponentsQNames: Set[QualifiedName] =
     reactNames.WrappedComponentsQNames.flatMap(withRewritten)
 
+  val RefAttributesQNames: Set[QualifiedName] =
+    reactNames.RefAttributesQNames.flatMap(withRewritten)
+
   val isRef: Set[QualifiedName] =
     reactNames.isRef.flatMap(withRewritten)
 
