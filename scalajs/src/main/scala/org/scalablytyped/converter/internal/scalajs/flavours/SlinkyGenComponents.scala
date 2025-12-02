@@ -233,10 +233,14 @@ class SlinkyGenComponents(
              It's used for a lot of things, so it's important to get right */
         val pkgCp = tree.codePath + SlinkyGenComponents.names.components
 
+        // Apply any component-specific generic adjustments (e.g. AntD List)
+        val adjustedComponents: IArray[Component] =
+          components.deepMap(adjustComponentGenerics)
+
         /* We group components on what essentially means they have the same interface.
          * When there is more than one they'll share some of the generated code */
         val allComponentsGrouped: Map[ComponentGroupKey, IArray[Component]] =
-          components.unnest.groupBy(groupKey)
+          adjustedComponents.unnest.groupBy(groupKey)
 
         /* this is mostly here as an optimization */
         val allResolvedProps: Map[ComponentGroupKey, PropsDom] =
@@ -316,7 +320,7 @@ class SlinkyGenComponents(
           }
 
         val generatedComponents: IArray[ModuleTree] =
-          components.map(genComponent(pkgCp, allBuilders))
+          adjustedComponents.map(genComponent(pkgCp, allBuilders))
 
         val allSharedBuilderClasses: IArray[ClassTree] =
           allSharedBuilders.mapToIArray { case (_, SharedBuilder(cls, _)) => cls }.distinctBy(_.name)
@@ -715,11 +719,74 @@ class SlinkyGenComponents(
 
   /**
     * Currently we don't try to infer additional type parameters from the props
-    * type. Just return the props and the component's existing type params
-    * unchanged.
+    * type in a generic way. Just return the props and the component's existing
+    * type params unchanged.
+    *
+    * Any component-specific generic tweaking (for example Ant Design's List)
+    * happens earlier, when we adjust the [[Component]] itself in
+    * [[adjustComponentGenerics]].
     */
   private def adjustPropsAndTparams(c: Component, propsRef: PropsRef): (PropsRef, IArray[TypeParamTree]) =
     (propsRef, c.tparams)
+
+/**
+    * Recognise specific React components for which we apply a narrow generic
+    * override (currently Ant Design `List` and `Segmented`). This is kept
+    * private and library-agnostic so it can be extended with other
+    * component-specific tweaks in the future.
+    */
+  private def isSpecialGenericComponent(c: Component): Boolean = {
+    def importedFrom(mods: Set[String]): Boolean =
+      c.location match {
+        case Right(Annotation.JsImport(module, _, _)) => mods.contains(module)
+        case _                                       => false
+      }
+
+    (c.fullName == Name("List") && importedFrom(Set("antd/es/list", "antd/lib/list"))) ||
+    (c.fullName == Name("Segmented") && importedFrom(Set("antd/es/segmented", "antd/lib/segmented")))
+  }
+
+  /**
+    * For Ant Design's `List` component in versions where the default export is
+    * typed as a plain function returning `ListProps[Any]`, re-introduce a
+    * single synthetic type parameter `T` and rewrite the props to
+    * `ListProps[T]`.
+    *
+    * This is intentionally very narrow (only for AntD List) so that other
+    * components like `Portal` or `Extract` stay monomorphic and we avoid
+    * re-introducing `not found: type T` errors.
+    */
+  private def adjustComponentGenerics(c: Component): Component = {
+    if (!isSpecialGenericComponent(c) || c.tparams.nonEmpty) c
+    else {
+      val tName   = Name("T")
+      var changed = false
+
+      def rewriteProps(tpe: TypeRef): TypeRef =
+        tpe match {
+          // `ListProps[Any]` -> `ListProps[T]`
+          case TypeRef(typeName, IArray.exactlyOne(TypeRef.Any), comments)
+              if typeName.parts.nonEmpty && typeName.parts.last == Name("ListProps") =>
+            changed = true
+            TypeRef(typeName, IArray(TypeRef(tName)), comments)
+
+          // Also handle intersections such as `ListProps[Any] & { ... }`
+          case TypeRef.Intersection(types, comments) =>
+            val newTypes = types.map(rewriteProps)
+            if (changed) TypeRef.Intersection(newTypes, comments) else tpe
+
+          case other => other
+        }
+
+      val newPropsRef = PropsRef(rewriteProps(c.propsRef.ref))
+
+      if (!changed) c
+      else {
+        val tparam = TypeParamTree(tName, Empty, None, NoComments, ignoreBound = false)
+        c.copy(tparams = IArray(tparam), propsRef = newPropsRef)
+      }
+    }
+  }
 
   def genImportModule(c: Component, componentCp: QualifiedName): Tree =
     c.location match {
