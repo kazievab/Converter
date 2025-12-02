@@ -21,6 +21,21 @@ class IdentifyReactComponents(
 
     val preferModule = !c.isGlobal
 
+    /* Prefer when the imported module basename matches the component name
+     *
+     *  This helps disambiguate cases like antd's top-level `List` component
+     *  (imported from ".../list") vs nested components called `List` that
+     *  live under other modules (for example `Form.List`).
+     */
+    val preferModuleNameMatchesComponent = c.location match {
+      case Right(Annotation.JsImport(module, _, _)) =>
+        val base = module.split('/').lastOption.getOrElse(module)
+        val normalizedBase = base.takeWhile(_ != '.').toLowerCase
+        val name           = c.fullName.unescaped.toLowerCase
+        normalizedBase == name
+      case _ => false
+    }
+
     /* because some libraries expect you to use top-level imports. shame for the tree shakers */
     val preferShortModuleName = c.location match {
       case Right(Annotation.JsGlobalScope)          => 0
@@ -43,6 +58,7 @@ class IdentifyReactComponents(
     (
       preferNotSrc,
       preferModule,
+      preferModuleNameMatchesComponent,
       preferShortModuleName,
       preferNested,
       preferPropsMatchesName,
