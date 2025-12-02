@@ -714,41 +714,12 @@ class SlinkyGenComponents(
   }
 
   /**
-    * Heuristic: if a component has no explicit type parameters but its props type
-    * is of the shape `FooProps[Any]` (optionally inside an intersection),
-    * synthesize a single type parameter `T` and replace that `Any` with `T`.
-    *
-    * This mirrors the Japgolly flavour and mainly helps for components exported
-    * as plain generic functions like `declare const List: <T>(props: ListProps<T>) => ReactElement`.
+    * Currently we don't try to infer additional type parameters from the props
+    * type. Just return the props and the component's existing type params
+    * unchanged.
     */
-  private def adjustPropsAndTparams(c: Component, propsRef: PropsRef): (PropsRef, IArray[TypeParamTree]) = {
-    if (c.tparams.nonEmpty) (propsRef, c.tparams)
-    else {
-      val tName   = Name("T")
-      var changed = false
-
-      def replaceAny(tr: TypeRef): TypeRef =
-        tr match {
-          case TypeRef(typeName, IArray.exactlyOne(TypeRef.Any), comments) =>
-            changed = true
-            TypeRef(typeName, IArray(TypeRef(tName)), comments)
-
-          case TypeRef.Intersection(types, comments) =>
-            val newTypes = types.map(replaceAny)
-            if (changed) TypeRef.Intersection(newTypes, comments) else tr
-
-          case other => other
-        }
-
-      val newRef = replaceAny(propsRef.ref)
-
-      if (!changed) (propsRef, c.tparams)
-      else {
-        val tparam = TypeParamTree(tName, Empty, Some(TypeRef.JsObject), NoComments, ignoreBound = false)
-        (PropsRef(newRef), IArray(tparam))
-      }
-    }
-  }
+  private def adjustPropsAndTparams(c: Component, propsRef: PropsRef): (PropsRef, IArray[TypeParamTree]) =
+    (propsRef, c.tparams)
 
   def genImportModule(c: Component, componentCp: QualifiedName): Tree =
     c.location match {
