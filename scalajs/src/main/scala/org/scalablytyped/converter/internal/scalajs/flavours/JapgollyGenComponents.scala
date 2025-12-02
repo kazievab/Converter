@@ -237,7 +237,11 @@ class JapgollyGenComponents(
                     val typeArgs     = IArray(effectiveRef(scope, resProps, c.referenceTo))
                     val stBuilderRef = TypeRef(genStBuilder.builderCp, typeArgs, NoComments)
 
-                    genBuilderClass(ownerCp, Name("Builder"), group.tparams, stBuilderRef, Empty) match {
+                    // For components where props have an unsupported shape (Res.Error),
+                    // avoid propagating generic type parameters into the local Builder.
+                    // This prevents illegal references to a type parameter T that is
+                    // not actually in scope for the companion object methods.
+                    genBuilderClass(ownerCp, Name("Builder"), Empty, stBuilderRef, Empty) match {
                       case Some(b) => Builder.Include(b)
                       case None    => Builder.External(TypeRef(genStBuilder.Default.codePath, typeArgs, NoComments))
                     }
