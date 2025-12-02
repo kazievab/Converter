@@ -432,16 +432,19 @@ class SlinkyGenComponents(
     val resProps    = builderLookup(groupKey(c))
     resProps match {
       case Res.Error((errors, genBuilder)) =>
-        errorModule(c.propsRef, c, componentCp, errors, genBuilder)
+        val (effPropsRef, effTparams) = adjustPropsAndTparams(c, c.propsRef)
+        errorModule(effPropsRef, c, componentCp, effTparams, errors, genBuilder)
 
       case Res.One(propsRef, (splitProps, genBuilder)) =>
-        componentModule(c.fullName, c, componentCp, PropsRef(propsRef), splitProps, genBuilder, builderLookup)
+        val (effPropsRef, effTparams) = adjustPropsAndTparams(c, PropsRef(propsRef))
+        componentModule(c.fullName, c, componentCp, effPropsRef, splitProps, genBuilder, builderLookup, effTparams)
 
       case Res.Many(values) =>
         val members = values.mapToIArray {
           case (propsRef, (splitProps, genBuilder: GenBuilder)) =>
-            val name = Name(nameFor(propsRef))
-            componentModule(name, c, componentCp + name, PropsRef(propsRef), splitProps, genBuilder, builderLookup)
+            val name                      = Name(nameFor(propsRef))
+            val (effPropsRef, effTparams) = adjustPropsAndTparams(c, PropsRef(propsRef))
+            componentModule(name, c, componentCp + name, effPropsRef, splitProps, genBuilder, builderLookup, effTparams)
         }
 
         ModuleTree(
@@ -461,14 +464,15 @@ class SlinkyGenComponents(
       propsRef:    PropsRef,
       c:           flavours.Component,
       componentCp: QualifiedName,
+      tparams:     IArray[TypeParamTree],
       errors:      IArray[String],
       genBuilder:  GenBuilder,
   ): ModuleTree = {
     val builder = genBuilder(componentCp, c)
     val members = IArray.fromOptions(
       builder.include,
-      Some(genPropsMethod(Name.APPLY, componentCp, propsRef, c.tparams, builder.ref)),
-      genImplicitConversionOpt(Name("make"), componentCp, c.tparams, props = SplitProps(Empty, Empty), builder.ref),
+      Some(genPropsMethod(Name.APPLY, componentCp, propsRef, tparams, builder.ref)),
+      genImplicitConversionOpt(Name("make"), componentCp, tparams, props = SplitProps(Empty, Empty), builder.ref),
     )
 
     val errorComment =
@@ -497,16 +501,17 @@ class SlinkyGenComponents(
       splitProps:    SplitProps,
       genBuilder:    GenBuilder,
       builderLookup: BuildersByGroup,
+      tparams:       IArray[TypeParamTree],
   ): ModuleTree = {
     val builder = genBuilder(componentCp, c)
 
     val members = IArray.fromOptions(
-      Some(genPropsAlias(propsRef, c.tparams, componentCp)),
+      Some(genPropsAlias(propsRef, tparams, componentCp)),
       Some(genImportModule(c, componentCp)),
       builder.include,
-      Some(genPropsMethod(Name("withProps"), componentCp, propsRef, c.tparams, builder.ref)),
-      genApplyMethodOpt(Name.APPLY, componentCp, propsRef, splitProps, c.tparams, builder.ref),
-      genImplicitConversionOpt(Name("make"), componentCp, c.tparams, splitProps, builder.ref),
+      Some(genPropsMethod(Name("withProps"), componentCp, propsRef, tparams, builder.ref)),
+      genApplyMethodOpt(Name.APPLY, componentCp, propsRef, splitProps, tparams, builder.ref),
+      genImplicitConversionOpt(Name("make"), componentCp, tparams, splitProps, builder.ref),
     )
 
     val nested = c.nested.map(genComponent(componentCp, builderLookup))
@@ -699,6 +704,43 @@ class SlinkyGenComponents(
       codePath    = ownerCp + name,
       isImplicit  = false,
     )
+  }
+
+  /**
+    * Heuristic: if a component has no explicit type parameters but its props type
+    * is of the shape `FooProps[Any]` (optionally inside an intersection),
+    * synthesize a single type parameter `T` and replace that `Any` with `T`.
+    *
+    * This mirrors the Japgolly flavour and mainly helps for components exported
+    * as plain generic functions like `declare const List: <T>(props: ListProps<T>) => ReactElement`.
+    */
+  private def adjustPropsAndTparams(c: Component, propsRef: PropsRef): (PropsRef, IArray[TypeParamTree]) = {
+    if (c.tparams.nonEmpty) (propsRef, c.tparams)
+    else {
+      val tName   = Name("T")
+      var changed = false
+
+      def replaceAny(tr: TypeRef): TypeRef =
+        tr match {
+          case TypeRef(typeName, IArray.exactlyOne(TypeRef.Any), comments) =>
+            changed = true
+            TypeRef(typeName, IArray(TypeRef(tName)), comments)
+
+          case TypeRef.Intersection(types, comments) =>
+            val newTypes = types.map(replaceAny)
+            if (changed) TypeRef.Intersection(newTypes, comments) else tr
+
+          case other => other
+        }
+
+      val newRef = replaceAny(propsRef.ref)
+
+      if (!changed) (propsRef, c.tparams)
+      else {
+        val tparam = TypeParamTree(tName, Empty, Some(TypeRef.JsObject), NoComments, ignoreBound = false)
+        (PropsRef(newRef), IArray(tparam))
+      }
+    }
   }
 
   def genImportModule(c: Component, componentCp: QualifiedName): Tree =
