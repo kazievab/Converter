@@ -164,6 +164,7 @@ class JapgollyGenComponents(
     enableLongApplyMethod: Boolean,
 ) {
   import JapgollyGenComponents._
+  import FindProps.MaxParamsForMethod
 
   /**
     * React.ForwardRefExoticComponent and friends often wrap props in an
@@ -469,7 +470,13 @@ class JapgollyGenComponents(
   ): Option[MethodTree] =
     if (splitProps.propsInApply.isEmpty && tparams.isEmpty) None
     else {
-      val cm = CreatorMethod(splitProps.propsInApply, longApplyMethod = enableLongApplyMethod)
+      val limitedPropsInApply =
+        if (splitProps.propsInApply.length <= MaxParamsForMethod)
+          splitProps.propsInApply
+        else
+          splitProps.propsInApply.take(MaxParamsForMethod)
+
+      val cm = CreatorMethod(limitedPropsInApply, longApplyMethod = enableLongApplyMethod)
 
       val impl: ExprTree = {
         val objName = Name("__props")

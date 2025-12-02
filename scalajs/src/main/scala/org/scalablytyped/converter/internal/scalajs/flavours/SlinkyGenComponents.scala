@@ -210,6 +210,7 @@ class SlinkyGenComponents(
     reactNames:   ReactNamesProxy,
 ) {
   import SlinkyGenComponents._
+  import FindProps.MaxParamsForMethod
 
   /**
     * React.ForwardRefExoticComponent and similar utilities often wrap props in
@@ -545,7 +546,13 @@ class SlinkyGenComponents(
   ): Option[MethodTree] =
     if (!splitProps.hasRequiredProps && tparams.isEmpty) None
     else {
-      val cm = CreatorMethod(splitProps.props, longApplyMethod = false)
+      val limitedProps =
+        if (splitProps.props.length <= MaxParamsForMethod)
+          splitProps.props
+        else
+          splitProps.props.take(MaxParamsForMethod)
+
+      val cm = CreatorMethod(limitedProps, longApplyMethod = false)
       val impl: ExprTree = {
         val objName = Name("__props")
 
