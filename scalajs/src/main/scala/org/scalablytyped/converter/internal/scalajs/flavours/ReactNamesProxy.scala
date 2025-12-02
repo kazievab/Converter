@@ -39,11 +39,24 @@ class ReactNamesProxy(reactNames: ReactNames, rewrites: IArray[CastConversion]) 
   /* the portion of the type system implemented in ST is not powerful enough to handle these constructs */
   def unpackedProps(propsRef: TypeRef): PropsRef =
     propsRef match {
+      // PropsWithoutRef[P] / PropsWithRef[P]
       case TypeRef(name, IArray.first(head), _) if reactNames.PropsWithWithoutRefQNames(name) =>
         PropsRef(head)
+
+      // ComponentPropsWithRef<C> / ComponentPropsWithoutRef<C>
       case TypeRef(name, IArray.first(TypeRef(_, IArray.first(head), _)), _)
           if reactNames.ComponentPropsWithWithoutRefQNames(name) =>
         PropsRef(head)
+
+      // Typical ForwardRefExoticComponent instantiation expands to something like
+      //   NamedExoticComponent<PropsWithoutRef<P> & RefAttributes<R>>
+      // In that case we want to recover P and ignore the RefAttributes-part.
+      case TypeRef.Intersection(types, _) =>
+        types.collectFirst {
+          case TypeRef(name, IArray.first(head), _) if reactNames.PropsWithWithoutRefQNames(name) =>
+            PropsRef(head)
+        }.getOrElse(PropsRef(propsRef))
+
       case other =>
         PropsRef(other)
     }

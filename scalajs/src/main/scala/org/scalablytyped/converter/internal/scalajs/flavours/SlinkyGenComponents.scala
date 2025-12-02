@@ -387,6 +387,7 @@ class SlinkyGenComponents(
         tparams,
         scope,
         maxNum             = Int.MaxValue,
+        acceptNativeTraits = false,
       )
 
     withDomProps match {
