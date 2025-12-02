@@ -365,17 +365,19 @@ class IdentifyReactComponents(
         }
       }
 
-    val fieldResult = pointsAtComponentType(scope, field.tpe).map(propsRef =>
+    val fieldResult = pointsAtComponentType(scope, field.tpe).map { propsRef =>
+      val inferredTparams = inferTypeParamsFromProps(propsRef, scope)
+
       Component(
         location      = Right(locationFrom(scope)),
         scalaRef      = TypeRef(field.codePath),
         fullName      = componentName(field.annotations, QualifiedName(IArray(field.name))),
-        tparams       = Empty,
+        tparams       = inferredTparams,
         propsRef      = propsRef,
         componentType = ComponentType.Field,
         nested        = Empty,
-      ),
-    )
+      )
+    }
     def isAliasToFC: Option[Component] =
       FollowAliases(scope)(field.tpe) match {
         case TypeRef.JsFunction(paramTypes, ret) =>
@@ -405,6 +407,39 @@ class IdentifyReactComponents(
       }
 
     fieldResult.orElse(isAliasToFC)
+  }
+
+  /**
+    * Infer type parameters for a field-based React component from the props type.
+    *
+    * For declarations like `declare const List: <T>(props: ListProps<T>) => ReactElement`,
+    * the generic type parameter `T` often does not appear on the field itself in our IR,
+    * but it will show up as a free type parameter inside the resolved props type.
+    *
+    * We look for type arguments that refer to type parameters visible in the current [[TreeScope]]
+    * and keep them in declaration order. This lets downstream code (JapgollyGenComponents)
+    * treat such components as generic even when they come from plain function types.
+    */
+  private def inferTypeParamsFromProps(propsRef: PropsRef, scope: TreeScope): IArray[TypeParamTree] = {
+    val available = scope.tparams
+    if (available.isEmpty) Empty
+    else {
+      val usedNames = scala.collection.mutable.LinkedHashSet.empty[Name]
+
+      def loop(tpe: TypeRef): Unit = {
+        tpe.typeName.parts match {
+          case IArray.exactlyOne(name) if available.contains(name) =>
+            usedNames += name
+          case _ => ()
+        }
+
+        tpe.targs.foreach(loop)
+      }
+
+      loop(propsRef.ref)
+
+      IArray.fromTraversable(usedNames.iterator.flatMap(available.get))
+    }
   }
 
   def maybeClassComponent(cls: ClassTree, scope: TreeScope): Option[Component] =
