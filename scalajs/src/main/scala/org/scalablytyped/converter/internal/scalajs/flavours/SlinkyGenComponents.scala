@@ -295,7 +295,11 @@ class SlinkyGenComponents(
                           val typeArgs     = IArray(domTag(domInfo), effectiveRef(scope, resProps, c.referenceTo))
                           val stBuilderRef = TypeRef(genStBuilder.builderCp, typeArgs, NoComments)
 
-                          genBuilderClass(ownerCp, Name("Builder"), group.tparams, stBuilderRef, splitProps.props) match {
+                          // Use any synthetic type parameters inferred from props
+                          // (for example when we rewrote Props[Any] -> Props[T]).
+                          val (_, effTparams) = adjustPropsAndTparams(c, propsRef)
+
+                          genBuilderClass(ownerCp, Name("Builder"), effTparams, stBuilderRef, splitProps.props) match {
                             case Some(b) => Builder.Include(b)
                             case None =>
                               Builder.External(TypeRef(genStBuilder.Default.codePath, typeArgs, NoComments))
