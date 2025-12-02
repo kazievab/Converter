@@ -707,10 +707,43 @@ class JapgollyGenComponents(
   ): Option[ClassTree] = {
     val clsCodePath = owner + name
 
+    // If the component is generic, try to map occurrences of `Any` in the
+    // generated builder API to the generic type parameter instead. This is
+    // mainly useful for cases where the underlying TS component is declared
+    // as a generic function and we have had to synthesize a type parameter
+    // based on `Props[Any]`.
+    val genericTypeOpt: Option[TypeRef] =
+      tparams.headOption.map(tp => TypeRef(tp.name))
+
+    def mapPropType(tpe: TypeRef): TypeRef =
+      genericTypeOpt match {
+        case None => tpe
+        case Some(gen) =>
+          tpe match {
+            // Plain Any -> T
+            case TypeRef.Any => gen
+
+            // js.Array[Any] -> js.Array[T]
+            case TypeRef(typeName, IArray.exactlyOne(TypeRef.Any), comments) if typeName === QualifiedName.JsArray =>
+              TypeRef(typeName, IArray(gen), comments)
+
+            // js.FunctionN[Any, ...] -> js.FunctionN[T, ...] (only first param)
+            case TypeRef.JsFunction(paramTypes, resType) =>
+              val newParams =
+                if (paramTypes.nonEmpty && paramTypes.head === TypeRef.Any)
+                  paramTypes.updated(0, gen)
+                else paramTypes
+              TypeRef.JsFunction(None, newParams, resType, tpe.comments)
+
+            case other => other
+          }
+      }
+
     val members: IArray[MethodTree] =
       props.flatMap {
         case Prop.CompressedProp(name, tpe, asExpr, isRequired) =>
-          val args1 = Call(Ref(genStBuilder.args.name), IArray(IArray(IntLit("1"))))
+          val mappedTpe = mapPropType(tpe)
+          val args1     = Call(Ref(genStBuilder.args.name), IArray(IArray(IntLit("1"))))
 
           val (default, update) =
             if (isRequired) (NotImplemented, asExpr(args1))
@@ -718,7 +751,7 @@ class JapgollyGenComponents(
 
           val impl = Block(update, Ref(QualifiedName.THIS))
 
-          val param = ParamTree(name, isImplicit = false, isVal = false, tpe, default, NoComments)
+          val param = ParamTree(name, isImplicit = false, isVal = false, mappedTpe, default, NoComments)
 
           IArray(
             MethodTree(
@@ -749,7 +782,8 @@ class JapgollyGenComponents(
 
           val variantsMethods: IArray[MethodTree] = variantsForProp.mapToIArray {
             case (methodName, Prop.Variant(tpe, asExpr, _, _)) =>
-              val param = ParamTree(Name("value"), isImplicit = false, isVal = false, tpe, NotImplemented, NoComments)
+              val paramTpe = mapPropType(tpe)
+              val param = ParamTree(Name("value"), isImplicit = false, isVal = false, paramTpe, NotImplemented, NoComments)
               val impl = Call(
                 Ref(genStBuilder.set.name),
                 IArray(IArray(StringLit(prop.originalName.unescaped), asExpr(Ref(param.name)))),
