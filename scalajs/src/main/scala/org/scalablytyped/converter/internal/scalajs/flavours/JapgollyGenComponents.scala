@@ -690,13 +690,14 @@ class JapgollyGenComponents(
 
       def rewriteProps(tpe: TypeRef): TypeRef =
         tpe match {
-          // `ListProps[Any]` -> `ListProps[T]`
+          // `ListProps[Any]` / `SegmentedProps[Any]` -> ...[T]
           case TypeRef(typeName, IArray.exactlyOne(TypeRef.Any), comments)
-              if typeName.parts.nonEmpty && typeName.parts.last == Name("ListProps") =>
+              if typeName.parts.nonEmpty &&
+                 Set("ListProps", "SegmentedProps").contains(typeName.parts.last.unescaped) =>
             changed = true
             TypeRef(typeName, IArray(TypeRef(tName)), comments)
 
-          // Also handle intersections such as `ListProps[Any] & { ... }`
+          // Also handle intersections such as `... & { ... }`
           case TypeRef.Intersection(types, comments) =>
             val newTypes = types.map(rewriteProps)
             if (changed) TypeRef.Intersection(newTypes, comments) else tpe
