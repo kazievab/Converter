@@ -99,9 +99,13 @@ final class FindProps(
       acceptNativeTraits: Boolean,
   ): Res[IArray[String], IArray[Prop]] =
     FollowAliases(scope)(typeRef) match {
-      case TypeRef.Any => // todo: now that we can resolve `Any` we need a not found type or something.
-        val msg = s"Could't extract props from ${Printer.formatTypeRef(0)(typeRef)} because couldn't resolve ClassTree."
-        Res.Error(IArray(msg))
+      case TypeRef.Any =>
+        // When a type alias or parent reduces to `Any` (often due to unresolved
+        // references in upstream .d.ts like path-mapped imports), we treat it as
+        // having no discoverable props instead of hard-failing. This allows
+        // intersections such as `InlineProps & Omit<Any, ...> & ExtendsProps` to
+        // still yield useful props from the other arms.
+        Res.One(TypeRef.JsObject, Empty)
       case TypeRef.JsObject => Res.One(typeRef, Empty)
       case TypeRef.Intersection(types, _) =>
         val results: IArray[Res[IArray[String], IArray[Prop]]] =
