@@ -730,8 +730,9 @@ class JapgollyGenComponents(
           codePath    = componentCp + names.component,
         )
       case Right(location) =>
+        val sanitized = sanitizeImportLocation(location)
         FieldTree(
-          annotations = IArray(Annotation.JsNative, location),
+          annotations = IArray(Annotation.JsNative, sanitized),
           level       = ProtectionLevel.Public,
           name        = names.component,
           tpe         = TypeRef.JsObject,
@@ -741,6 +742,29 @@ class JapgollyGenComponents(
           comments    = NoComments,
           codePath    = componentCp + names.component,
         )
+    }
+
+  private def sanitizeImportLocation(location: LocationAnnotation): LocationAnnotation =
+    location match {
+      case Annotation.JsImport(module, Imported.Named(names), globalOpt) if names.nonEmpty =>
+        val last    = names.last
+        val rawName = last.unescaped
+        val idx     = rawName.indexOf('_')
+
+        // Heuristic: if the exported name ends with a suffix of the form
+        // `_<lowercase>`, assume the suffix encodes a Scala-only decoration
+        // (for example a fixed type parameter like `_text`) and strip it from
+        // the JS import while keeping the Scala name unchanged.
+        if (idx > 0 && rawName.substring(idx + 1).forall(_.isLower)) {
+          val baseName  = rawName.substring(0, idx)
+          val newLast   = Name(baseName)
+          val newNames  = names.updated(names.length - 1, newLast)
+          val imported2 = Imported.Named(newNames)
+          Annotation.JsImport(module, imported2, globalOpt)
+        } else
+          location
+
+      case _ => location
     }
 
   def genBuilderClass(
